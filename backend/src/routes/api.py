@@ -1,12 +1,13 @@
-from fastapi import APIRouter,Depends
+from fastapi import APIRouter,Depends,Response,HTTPException
 from sqlalchemy import select,func,text
 from src.config.database import get_db
 from src.controllers.auth import current,writable,admin,login
 from src.controllers.export import export_review
-from src.schemas.business import Login,BatchInput,InspectionInput,ReviewInput,ApprovalInput
-from src.models.entities import Batch,Inspection,Review,Audit
-from src.services import business
+from src.schemas.business import Login,BatchInput,InspectionInput,ReviewInput,ApprovalInput,OfflinePackageInput,ResolveInput
+from src.models.entities import Batch,Inspection,Review,Audit,OfflinePackage
+from src.services import business,offline
 from src.utils.serialize import record
+import json
 router=APIRouter()
 @router.post('/auth/login')
 def auth(data:Login,db=Depends(get_db)):return login(db,data)
@@ -35,3 +36,23 @@ def export(id:int,db=Depends(get_db),u=Depends(current)):return export_review(bu
 def audits(db=Depends(get_db),u=Depends(admin)):return [record(x) for x in db.scalars(select(Audit).order_by(Audit.id.desc()).limit(100))]
 @router.get('/counts')
 def counts(db=Depends(get_db),u=Depends(current)):return {m.__tablename__:db.scalar(select(func.count()).select_from(m)) for m in (Batch,Inspection,Review)}
+@router.get('/offline/baseline')
+def baseline(db=Depends(get_db),u=Depends(current)):
+    doc=offline.export_baseline(db)
+    return Response(content=json.dumps(doc,ensure_ascii=False,indent=1),media_type='application/json; charset=utf-8',headers={'Content-Disposition':f'attachment; filename="mill-offline-{doc["baseline"]}.json"'})
+@router.post('/offline/packages',status_code=201)
+def upload_package(data:OfflinePackageInput,response:Response,db=Depends(get_db),u=Depends(writable)):
+    pkg,created=offline.upload(db,data,u)
+    if not created:response.status_code=200
+    return record(pkg)
+@router.get('/offline/packages')
+def list_packages(db=Depends(get_db),u=Depends(current)):return offline.packages(db)
+@router.get('/offline/packages/{id}')
+def get_package(id:int,db=Depends(get_db),u=Depends(current)):
+    p=db.get(OfflinePackage,id)
+    if not p:raise HTTPException(404,'工作包不存在')
+    return record(p)
+@router.post('/offline/packages/{id}/resolve')
+def resolve_package(id:int,data:ResolveInput,db=Depends(get_db),u=Depends(admin)):return record(offline.resolve(db,id,data))
+@router.post('/offline/packages/{id}/accept')
+def accept_package(id:int,db=Depends(get_db),u=Depends(writable)):return record(offline.attempt_accept(db,id))

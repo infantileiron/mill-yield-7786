@@ -2,3 +2,6 @@
 -- This migration documents the business keys used for idempotent demo seed.
 -- batches.code UNIQUE; inspections.sample_code UNIQUE; users.email UNIQUE.
 -- reviews stores immutable JSON snapshots, result checksum and approver identity.
+-- offline_packages.package_key UNIQUE (sha256 of site+baseline+payload) makes
+-- package upload/accept idempotent; payload/plan/result kept as JSON so a
+-- pending package survives failures and never touches ledgers until accepted.

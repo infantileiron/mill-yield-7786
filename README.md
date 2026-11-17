@@ -10,6 +10,7 @@
 - 检验录入：出粉率、水分、检验员，范围校验和重复编号阻断。
 - 分布诊断：按产线冻结快照，Redis 排队由独立 Python worker 计算，显示完整样本直方图、分位数、IQR 异常点和分组均值。
 - 复核报告：负责人签核意见，分析员与观察员可下载含原始样本的 CSV。
+- 离线工作包：分厂断网时各自导出基线离线登记，恢复后回传按基线合并，同号异物逐条裁定，包级原子接纳。
 - JWT 三角色、写操作审计、每分钟请求限流、可恢复的错误提示。
 
 ## 账号与权限
@@ -65,6 +66,17 @@ docker compose down -v --remove-orphans
 
 后台 worker 从 Redis 消费复核 id，更新 queued→running→completed/failed，写结果至共享 artifacts 卷。重启时会扫描未完成任务并重新排队。负责人仅能签核 completed 状态，签核后不可重复签核。CSV 导出包含状态、口径值、签核意见和所有冻结样本。
 
+## 离线工作包与断网合并
+
+分厂断网时在各自副本离线登记原粮与检验，网络恢复后回传，按基线合并，包从待合并到已接纳。
+
+- 导出基线：`GET /offline/baseline` 下载 `mill-offline-<基线令牌>.json`，含基线令牌、当前台账快照和空的 `added_batches` / `added_inspections`。同一基线文件可复制到多个分厂，两份副本可独立新增批次与检验。
+- 回传合并：`POST /offline/packages` 回传填写后的工作包（`site` 分厂标识必填）。合并只认业务编号（批次 `code`、检验 `sample_code`）；文件里的内部编号（如 `local_id`）不参与身份判定，撞号不当作同一对象。
+- 合并口径：同业务号同内容合并一次，不重复入库；同号异内容列为冲突，逐字段展示在线与离线双方差异。检验通过 `batch_code` 跟随包内批次（优先于在线同号批次），批次改号时检验始终跟随原批次，不会串批。
+- 裁定：冲突未清整包不进入台账，包内其余记录也不可见。负责人经 `POST /offline/packages/{id}/resolve` 逐条裁定：`use_online` 以在线为准（离线记录舍弃，检验并入在线同号批次），`rename` 改号入库（认定为不同对象，须给新编号）。裁定后按当前在线台账重新校验，与在线新增的冲突会再次列出，直至全部清净才接纳。
+- 接纳：无冲突的包回传即接纳。接纳是单事务写入，永不更新在线记录，并发撞号回滚重算；失败保留待合并内容，可经 `POST /offline/packages/{id}/accept` 重试；同包重复回传或重复接纳不会重复入库（按包内容哈希幂等）。
+- 权限：导出与查看全员可用；回传与重试需分析员或负责人；裁定仅质量负责人。接纳结果记录新增/合并/改号数量供核对入库；新诊断快照自动覆盖已接纳记录，既有复核报告与 CSV 不受影响。页面「05 离线工作包」可导出、回传、裁定并核对入库数量。
+
 ## 一天的工作剧本
 
 1. 08:50 观察员登录查看 `QH-1115-A`，核对 15 个已有样本。
@@ -82,7 +94,7 @@ docker compose down -v --remove-orphans
 
 本地 Python 开发：安装 `backend/requirements.txt`，配置 `DATABASE_URL` / `REDIS_URL` / `JWT_SECRET`，在 backend 目录执行 `uvicorn src.main:app --reload` 与 `python -m src.worker`。静态前端通过 Nginx `/api/` 代理后端无前缀路由，不需要 Node 构建。
 
-共享枚举：`backend/src/constants/enums.py` 与 `frontend/src/constants/enums.js` 中分别定义角色 Role、复核状态 ReviewStatus、产线 LINES；UI 角色标签、后端鉴权及状态迁移遵守这些值。
+共享枚举：`backend/src/constants/enums.py` 与 `frontend/src/constants/enums.js` 中分别定义角色 Role、复核状态 ReviewStatus、工作包状态 PackageStatus、产线 LINES；UI 角色标签、后端鉴权及状态迁移遵守这些值。
 
 ## 范围与已知差异
 

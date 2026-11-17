@@ -43,3 +43,18 @@ class Audit(Base):
     action:Mapped[str]=mapped_column(String(200))
     status:Mapped[int]=mapped_column(Integer)
     created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+class OfflinePackage(Base):
+    __tablename__="offline_packages"
+    id:Mapped[int]=mapped_column(primary_key=True)
+    package_key:Mapped[str]=mapped_column(String(64),unique=True)
+    site:Mapped[str]=mapped_column(String(50))
+    baseline:Mapped[str]=mapped_column(String(80))
+    status:Mapped[str]=mapped_column(String(20),default="pending")
+    payload:Mapped[dict]=mapped_column(JSON,default=dict)
+    resolutions:Mapped[dict]=mapped_column(JSON,default=dict)
+    plan:Mapped[dict]=mapped_column(JSON,default=dict)
+    result:Mapped[dict]=mapped_column(JSON,default=dict)
+    note:Mapped[str]=mapped_column(Text,default="")
+    created_by:Mapped[str]=mapped_column(String(100))
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+    accepted_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),nullable=True)
